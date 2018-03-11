@@ -128,7 +128,9 @@ def image_pred(model,img_path):
 		return []
 	else:
 		return bb_score 
-#resnet50_coco_best_v2.0.1.h5
-model = load_model('resnet50_coco_best_v2.0.1.h5')
-bb_score = image_pred(model,'objdet/test_images/image3.jpg')
-visualize_pred('objdet/test_images/image3.jpg',bb_score)
+
+def main():
+	#resnet50_coco_best_v2.0.1.h5
+	model = load_model('resnet50_coco_best_v2.0.1.h5')
+	bb_score = image_pred(model,'objdet/test_images/image3.jpg')
+	visualize_pred('objdet/test_images/image3.jpg',bb_score)
