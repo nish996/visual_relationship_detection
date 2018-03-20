@@ -43,7 +43,7 @@ keras.backend.tensorflow_backend.set_session(get_session())
 
 
 # adjust this to point to your downloaded/trained model
-model_path = os.path.join('..', 'snapshots', 'resnet50_csv_29.h5')
+model_path = os.path.join('..', 'snapshots', 'resnet50_csv_07.h5')
 
 # load retinanet model
 model = keras.models.load_model(model_path, custom_objects=custom_objects)
@@ -83,7 +83,6 @@ print(scores.shape)
 # correct for image scale
 detections[0, :, :4] /= scale
 # visualize detections
-'''
 for idx, (label, score) in enumerate(zip(predicted_labels, scores)):
     if score < 0.5:
         continue
@@ -97,4 +96,4 @@ plt.figure(figsize=(15, 15))
 plt.axis('off')
 plt.imshow(draw)
 plt.show()
-'''
+
