@@ -8,7 +8,9 @@ import subprocess
 OBJECT_JSON_PATH='/media/data/nishanth/datasets/json_dataset/objects.json'
 PREDICATE_JSON_PATH='/media/data/nishanth/datasets/json_dataset/predicates.json'
 TRAIN_JSON_PATH='/media/data/nishanth/datasets/json_dataset/annotations_train.json'
+#'/media/data/nishanth/datasets/sg_dataset/sg_train_annotations.json'
 TEST_JSON_PATH='/media/data/nishanth/datasets/json_dataset/annotations_test.json'
+#'/media/data/nishanth/datasets/json_dataset/annotations_test.json'
 APPEND_TRAIN_PATH='sg_dataset/sg_train_images/'
 APPEND_TEST_PATH='sg_dataset/sg_test_images/'
 
@@ -63,6 +65,10 @@ def objectjsonToCSV(inputData,filename):
 def labelsToNames():
 	dict = {}
 	for i in range(len(objects)):
+		if(objects[i] == 'trash can'):
+			objects[i] = 'trashcan'
+		if(objects[i] == 'traffic light'):
+			objects[i] = 'traffic-light'
 		dict[i]=objects[i]
 	return dict
 
