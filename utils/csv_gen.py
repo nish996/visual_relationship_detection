@@ -74,9 +74,10 @@ def labelsToNames():
 
 
 def predicatesToNames():
-	dict = {}
+	dict = []
 	for i in range(len(predicates)):
-		dict[i]=predicates[i]
+		x  = predicates[i].split(" ")
+		dict.append(x)
 	return dict
 
 def imageToLabels(inputData,image_file):
@@ -111,6 +112,8 @@ def main():
 	jsonToCSV(train_annotations,'train_temp.csv',1)
 	subprocess.call("./dup_removal.sh",shell=True)
 	objectjsonToCSV(objects,'/media/data/nishanth/datasets/objects.csv')
+
+
 
 #not needed for obj detection
 #objectjsonToCSV(predicates,'predicates.csv')

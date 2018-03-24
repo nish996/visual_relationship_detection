@@ -42,7 +42,6 @@ GLOVE_FILE_PATH = '/media/data/nishanth/datasets/glove_data/glove.42B.300d.txt'
 
 
 
-
 def load_session():
     # use this environment flag to change which GPU to use
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -376,6 +375,22 @@ def train_model():
     model.fit(x=[appr_feat,sem_feat], y=pred_encoded, epochs=30, callbacks= [checkpointer],batch_size=32)
     return
 
+
+def resume_model():
+    load_session()
+    print("Loading Feature Extraction Module")
+    sem_feat,appr_feat,pred = feature_extraction_tot(True, False)
+    print("Loaded Features :)")
+    pred_encoded = to_categorical(pred, num_classes=70)
+    model = load_model('weights-30.hdf5')
+    model.summary()
+    model.compile(optimizer='adam',loss='categorical_crossentropy',
+              metrics=['accuracy'])
+    modelsave_filepath="snapshots/weights-30-{epoch:02d}.hdf5"
+    checkpointer = ModelCheckpoint(modelsave_filepath, verbose=0, save_best_only=False, save_weights_only=False, mode='auto', period=5)
+    model.fit(x=[appr_feat,sem_feat], y=pred_encoded, epochs=30, callbacks= [checkpointer],batch_size=32)
+    return
+
 '''
 testing the feature model
 '''
@@ -399,12 +414,11 @@ def main():
 	#bb_score = image_pred(model,'objdet/test_images/image3.jpg')
 	#visualize_pred('objdet/test_images/image3.jpg',bb_score)
 	#feat= feature_extraction('1602315_961e6acf72_b.jpg')
-    test_model(True)
-
+    resume_model()
 
 
 
 if __name__ == "__main__":
-		main()
+    main()
 
 
