@@ -37,14 +37,12 @@ from utils.zeroSplit import zeroTestImageToLabels
 # set tf backend to allow memory to grow, instead of claiming everything
 import tensorflow as tf
 
+cpu_id = "1"
 
 GLOVE_FILE_PATH = '/media/data/nishanth/datasets/glove_data/glove.42B.300d.txt'
-
-
-
 def load_session():
     # use this environment flag to change which GPU to use
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["CUDA_VISIBLE_DEVICES"] = cpu_id
 
     # set the modified tf session as backend in keras
     keras.backend.tensorflow_backend.set_session(get_session())
@@ -59,7 +57,7 @@ def get_session():
 def load_model(model_name):
 
     # use this environment flag to change which GPU to use
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["CUDA_VISIBLE_DEVICES"] = cpu_id
 
     # set the modified tf session as backend in keras
     keras.backend.tensorflow_backend.set_session(get_session())
@@ -361,16 +359,21 @@ def feature_model():
 '''
 training the feature model
 '''
-def train_model():
+def train_model(load_flag):
     load_session()
-    print("Loading Feature Extraction Module")
-    sem_feat,appr_feat,pred = feature_extraction_tot(True, False)
-    print("Loaded Features :)")
+    if not(load_flag):
+        print("Loading Feature Extraction Module")
+        sem_feat,appr_feat,pred = feature_extraction_tot(True, False)
+        print("Loaded Features :)")
+    else:
+        print("Loading Features ...")
+        sem_feat,appr_feat,pred = load_features_tot()
+        print("Loaded Features")
     pred_encoded = to_categorical(pred, num_classes=70)
     model = feature_model()
     model.compile(optimizer='adam',loss='categorical_crossentropy',
               metrics=['accuracy'])
-    modelsave_filepath="snapshots/weights-{epoch:02d}.hdf5"
+    modelsave_filepath="snapshots/feat_models/weights-{epoch:02d}.hdf5"
     checkpointer = ModelCheckpoint(modelsave_filepath, verbose=0, save_best_only=False, save_weights_only=False, mode='auto', period=1)
     model.fit(x=[appr_feat,sem_feat], y=pred_encoded, epochs=30, callbacks= [checkpointer],batch_size=32)
     return
@@ -386,7 +389,7 @@ def resume_model():
     model.summary()
     model.compile(optimizer='adam',loss='categorical_crossentropy',
               metrics=['accuracy'])
-    modelsave_filepath="snapshots/weights-30-{epoch:02d}.hdf5"
+    modelsave_filepath="snapshots/feat_models/weights-30-{epoch:02d}.hdf5"
     checkpointer = ModelCheckpoint(modelsave_filepath, verbose=0, save_best_only=False, save_weights_only=False, mode='auto', period=5)
     model.fit(x=[appr_feat,sem_feat], y=pred_encoded, epochs=30, callbacks= [checkpointer],batch_size=32)
     return
@@ -396,7 +399,7 @@ testing the feature model
 '''
 def test_model(zero_shot_flag):
     print('Loading Model')
-    feature_model = load_model('weights-30.hdf5')
+    feature_model = load_model('feat_models/weights-30.hdf5')
     feature_model.summary()
     print('Loaded Model')
     print("Loading Feature Extraction Module")
@@ -408,15 +411,49 @@ def test_model(zero_shot_flag):
 
 
 
+def save_features(train_flag,zero_shot_flag):
+    if(train_flag):
+        sem_feat,appr_feat,pred =feature_extraction_tot(train_flag, zero_shot_flag)
+        np.save(open('sem_feat','wb'),sem_feat)
+        np.save(open('appr_feat','wb'),appr_feat)
+        np.save(open('pred','wb'),pred)
+    else:
+        if not(zero_shot_flag):
+            sem_feat,appr_feat,pred =feature_extraction_tot(train_flag, zero_shot_flag)
+            np.save(open('sem_feat_test','wb'),sem_feat)
+            np.save(open('appr_feat_test','wb'),appr_feat)
+            np.save(open('pred_test','wb'),pred)
+        else:
+            sem_feat,appr_feat,pred =feature_extraction_tot(train_flag, zero_shot_flag)
+            np.save(open('sem_feat_zero','wb'),sem_feat)
+            np.save(open('appr_feat_zero','wb'),appr_feat)
+            np.save(open('pred_zero','wb'),pred)
+
+def load_features_tot(train_flag,zero_shot_flag):
+    if(train_flag):
+        sem_feat = np.load('sem_feat')
+        appr_feat = np.load('appr_feat')
+        pred = np.load('pred')
+    else:
+        if not(zero_shot_flag):
+            sem_feat = np.load('sem_feat_test')
+            appr_feat = np.load('appr_feat_test')
+            pred = np.load('pred_test')
+        else:
+            sem_feat = np.load('sem_feat_zero')
+            appr_feat = np.load('appr_feat_zero')
+            pred = np.load('pred_zero')
+    return sem_feat,appr_feat,pred
+
 def main():
 	#resnet50_coco_best_v2.0.1.h5
 	#model = load_model('resnet50_csv_07.h5')
 	#bb_score = image_pred(model,'objdet/test_images/image3.jpg')
 	#visualize_pred('objdet/test_images/image3.jpg',bb_score)
 	#feat= feature_extraction('1602315_961e6acf72_b.jpg')
-    resume_model()
-
-
+    #resume_model()
+    save_features(False,False)
+    # load_features_tot()
 
 if __name__ == "__main__":
     main()
