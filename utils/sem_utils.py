@@ -2,6 +2,7 @@ import pickle as pk
 import numpy as np
 
 from utils.vg_load import vgObjectsToNames
+from utils.csv_gen import labelsToNames
 '''
 sematic features for a word using Glove
 '''
@@ -20,9 +21,32 @@ def loadGloveModel(gloveFile):
 
 
 
+'''
+save vrd object glove features
+'''
+def saveObjGloveFeat(glove_model):
+    obj = labelsToNames()
+    out = {}
+    for i in obj:
+        out[i] = glove_model[i]
+    dict_out = open('/media/data/nishanth/snapshots/obj_glove.pkl','wb')
+    pk.dump(out,dict_out)
+    dict_out.close()
+
+
 
 '''
-load object glove model
+load vrd object glove features
+'''
+def loadObjGloveFeat():
+    pickle_in = open('/media/data/nishanth/snapshots/obj_glove.pkl', 'rb')
+    return pk.load(pickle_in)
+
+
+
+
+'''
+save vg object glove features
 '''
 def saveVgObjGloveFeat(glove_model):
     # glove_model = loadGloveModel(GLOVE_FILE_PATH)
