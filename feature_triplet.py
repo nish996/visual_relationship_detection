@@ -190,7 +190,7 @@ def load_model(model_name):
 
 
 '''
-returns predicted bounding boxes with label index and scire for that index
+returns predicted bounding boxes with label index and score for that index
 output format : [[x1,y1,x2,y2,label,score],...]
 '''
 def image_pred(model,img_path):
