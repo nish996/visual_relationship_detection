@@ -22,6 +22,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.preprocessing import OneHotEncoder
 from keras.utils import to_categorical
 from keras.callbacks import ModelCheckpoint
+from keras.utils import Sequence
 
 
 # import miscellaneous modules
@@ -29,17 +30,20 @@ import matplotlib.pyplot as plt
 import cv2
 import numpy as np
 import time
+import random
 
 #import utils modules
 from utils.csv_gen import train_annotations,test_annotations,labelsToNames, imageToLabels, predicatesToNames
 from utils.zeroSplit import zeroTestImageToLabels
+from utils.vg_load import load_testvg_ann,load_trainvg_ann,load_zeroshot,vgPredicatesToNames,vgObjectsToNames,vgImageToLabels
 
 # set tf backend to allow memory to grow, instead of claiming everything
 import tensorflow as tf
 
-cpu_id = "1"
+cpu_id = "2"
 
 GLOVE_FILE_PATH = '/media/data/nishanth/datasets/glove_data/glove.42B.300d.txt'
+
 def load_session():
     # use this environment flag to change which GPU to use
     os.environ["CUDA_VISIBLE_DEVICES"] = cpu_id
@@ -150,8 +154,7 @@ Network for appearance module ( used VGGNet)
 input  : union bounding box
 output  : Visual features of bounding box
 '''
-def apprSubnet(bbox):
-	model = VGG16(weights='imagenet', include_top=False)
+def apprSubnet(bbox,model):
 	img = image.load_img(bbox, target_size=(224, 224))
 	x = image.img_to_array(img)
 	x = np.expand_dims(x, axis=0)
@@ -267,6 +270,41 @@ def pair_filtering():
 	return
 
 
+
+##############################################################################################
+#Model and Feature Extraction Modules for VRD
+
+
+def vgg_model(fc_flag):
+    if(fc_flag):
+        base_model = VGG16(weights='imagenet')
+        model = Model(base_model.inputs, base_model.get_layer('fc2').output, name=None)
+        model.summary()
+        return model
+    else:
+        model = VGG16(include_top=False, weights='imagenet')
+        model.summary()
+        return model
+
+
+def feature_model_novgg(fc_flag):
+    if(fc_flag):
+        appr_inputs = Input(shape=4096,name='appr_inputs')
+    else:
+        appr_inputs = Input(25088,name='appr_inputs')
+    x = Dense(4096, activation='relu')(app)
+    x = Dense(4096, activation='relu')(x)
+    appr_feats = Dense(256, activation='relu',name='appr_feat')(x)
+    sem_feat_input = Input(shape=(610,), name = 'semantic_feat')
+    merged_features  = keras.layers.concatenate([appr_feats,sem_feat_input],axis=-1)
+    fclayer = Dense(256, activation='relu',name = 'fcfeatures')(merged_features)
+    pred_layer = Dense(num_classes, activation='softmax', name='predictions')(fclayer)
+    model = Model(inputs=[appr_inputs,sem_feat_input], outputs=pred_layer, name='feature model')
+    model.summary()
+    return model
+
+
+
 '''
 extracts spatial, semantic and preprocessed appearance features for a given image
 '''
@@ -341,20 +379,20 @@ def feature_extraction_tot(train_flag,zero_shot_flag):
 '''
 Model for combining spatial, semantic and appearance features
 '''
-def feature_model():
-	appr_inputs = Input(shape=(224,224,3))
-	appr_model = VGG16(include_top=False, weights='imagenet')(appr_inputs)
-	x= Flatten()(appr_model)
-	x = Dense(4096, activation='relu')(x)
-	x = Dense(4096, activation='relu')(x)
-	appr_feats = Dense(256, activation='relu',name='appr_feat')(x)
-	sem_feat_input = Input(shape=(610,), name = 'semantic_feat')
-	merged_features  = keras.layers.concatenate([appr_feats,sem_feat_input],axis=-1)
-	fclayer = Dense(256, activation='relu',name = 'fcfeatures')(merged_features)
-	pred_layer = Dense(70, activation='softmax', name='predictions')(fclayer)
-	model = Model(inputs=[appr_inputs,sem_feat_input], outputs=pred_layer, name='feature model')
-	model.summary()
-	return model
+def feature_model(num_classes):
+    appr_inputs = Input(shape=(224,224,3),name='appr_inputs')
+    appr_model = VGG16(include_top=False, weights='imagenet')(appr_inputs)
+    x= Flatten()(appr_model)
+    x = Dense(4096, activation='relu')(x)
+    x = Dense(4096, activation='relu')(x)
+    appr_feats = Dense(256, activation='relu',name='appr_feat')(x)
+    sem_feat_input = Input(shape=(610,), name = 'semantic_feat')
+    merged_features  = keras.layers.concatenate([appr_feats,sem_feat_input],axis=-1)
+    fclayer = Dense(256, activation='relu',name = 'fcfeatures')(merged_features)
+    pred_layer = Dense(num_classes, activation='softmax', name='predictions')(fclayer)
+    model = Model(inputs=[appr_inputs,sem_feat_input], outputs=pred_layer, name='feature model')
+    model.summary()
+    return model
 
 '''
 training the feature model
@@ -367,10 +405,10 @@ def train_model(load_flag):
         print("Loaded Features :)")
     else:
         print("Loading Features ...")
-        sem_feat,appr_feat,pred = load_features_tot()
+        sem_feat,appr_feat,pred = load_features_tot(True,False)
         print("Loaded Features")
     pred_encoded = to_categorical(pred, num_classes=70)
-    model = feature_model()
+    model = feature_model(70)
     model.compile(optimizer='adam',loss='categorical_crossentropy',
               metrics=['accuracy'])
     modelsave_filepath="snapshots/feat_models/weights-{epoch:02d}.hdf5"
@@ -414,36 +452,320 @@ def test_model(zero_shot_flag):
 def save_features(train_flag,zero_shot_flag):
     if(train_flag):
         sem_feat,appr_feat,pred =feature_extraction_tot(train_flag, zero_shot_flag)
-        np.save(open('sem_feat','wb'),sem_feat)
-        np.save(open('appr_feat','wb'),appr_feat)
-        np.save(open('pred','wb'),pred)
+        np.save(open('snapshots/sem_feat','wb'),sem_feat)
+        np.save(open('snapshots/appr_feat','wb'),appr_feat)
+        np.save(open('snapshots/pred','wb'),pred)
     else:
         if not(zero_shot_flag):
             sem_feat,appr_feat,pred =feature_extraction_tot(train_flag, zero_shot_flag)
-            np.save(open('sem_feat_test','wb'),sem_feat)
-            np.save(open('appr_feat_test','wb'),appr_feat)
-            np.save(open('pred_test','wb'),pred)
+            np.save(open('snapshots/sem_feat_test','wb'),sem_feat)
+            np.save(open('snapshots/appr_feat_test','wb'),appr_feat)
+            np.save(open('snapshots/pred_test','wb'),pred)
         else:
             sem_feat,appr_feat,pred =feature_extraction_tot(train_flag, zero_shot_flag)
-            np.save(open('sem_feat_zero','wb'),sem_feat)
-            np.save(open('appr_feat_zero','wb'),appr_feat)
-            np.save(open('pred_zero','wb'),pred)
+            np.save(open('snapshots/sem_feat_zero','wb'),sem_feat)
+            np.save(open('snapshots/appr_feat_zero','wb'),appr_feat)
+            np.save(open('snapshots/pred_zero','wb'),pred)
 
 def load_features_tot(train_flag,zero_shot_flag):
     if(train_flag):
-        sem_feat = np.load('sem_feat')
-        appr_feat = np.load('appr_feat')
-        pred = np.load('pred')
+        sem_feat = np.load('snapshots/sem_feat')
+        appr_feat = np.load('snapshots/appr_feat')
+        pred = np.load('snapshots/pred')
     else:
         if not(zero_shot_flag):
-            sem_feat = np.load('sem_feat_test')
-            appr_feat = np.load('appr_feat_test')
-            pred = np.load('pred_test')
+            sem_feat = np.load('snapshots/sem_feat_test')
+            appr_feat = np.load('snapshots/appr_feat_test')
+            pred = np.load('snapshots/pred_test')
         else:
-            sem_feat = np.load('sem_feat_zero')
-            appr_feat = np.load('appr_feat_zero')
-            pred = np.load('pred_zero')
+            sem_feat = np.load('snapshots/sem_feat_zero')
+            appr_feat = np.load('snapshots/appr_feat_zero')
+            pred = np.load('snapshots/pred_zero')
     return sem_feat,appr_feat,pred
+
+
+
+
+
+######################################################################################################
+#model and features modules for Visual Genome
+def save_featuresVG(train_flag,zero_shot_flag):
+    if(train_flag):
+        sem_feat,appr_feat,pred =feature_extraction_vgtot(train_flag, zero_shot_flag)
+        np.save(open('snapshots/sem_featvg1','wb'),sem_feat)
+        np.save(open('snapshots/appr_featvg1','wb'),appr_feat)
+        np.save(open('snapshots/predvg1','wb'),pred)
+    else:
+        if not(zero_shot_flag):
+            sem_feat,appr_feat,pred =feature_extraction_vgtot(train_flag, zero_shot_flag)
+            np.save(open('snapshots/sem_feat_test','wb'),sem_feat)
+            np.save(open('snapshots/appr_feat_test','wb'),appr_feat)
+            np.save(open('snapshots/pred_test','wb'),pred)
+        else:
+            sem_feat,appr_feat,pred =feature_extraction_vgtot(train_flag, zero_shot_flag)
+            np.save(open('snapshots/sem_feat_zero','wb'),sem_feat)
+            np.save(open('snapshots/appr_feat_zero','wb'),appr_feat)
+            np.save(open('snapshots/pred_zero','wb'),pred)
+
+
+def feature_extraction_vgtot(train_flag,zero_shot_flag):
+    glove_model = loadGloveModel(GLOVE_FILE_PATH)
+    labels_to_names = vgObjectsToNames()
+    tot_features = []
+    tot_appr_features =[]
+    tot_pred = []
+    filepath = 'datasets/vg/VG_100K/'
+    if train_flag:
+        annotations = load_trainvg_ann()
+    else:
+        annotations = load_testvg_ann()
+    if zero_shot_flag:
+        img_files,gt_spo,gt_bb = load_zeroshot()
+        for j in range(len(img_files)):
+            im = cv2.imread(os.path.join(filepath,img_files[j])).astype(np.float32, copy=False)
+            ih = im.shape[0]
+            iw = im.shape[1]
+            for i in range(gt_spo[j].shape[0]):
+                sub_bbox = gt_bb[j][i,0,:4].astype(int)
+                obj_bbox = gt_bb[j][i,1,:4].astype(int)
+                sub_wordvec = glove_model[labels_to_names[gt_spo[j][i,0]]]
+                obj_wordvec = glove_model[labels_to_names[gt_spo[j][i,2]]]
+                sem_feat = np.concatenate((sub_wordvec,obj_wordvec),axis=0)
+                union_bbox = getUnionBBox(sub_bbox, obj_bbox, ih, iw)
+                appr_feat_temp = getAppr(im, union_bbox)
+                #appr_feat = apprSubnet(appr_feat_temp)
+                spat_feat = np.concatenate((getSimpleSpatialFeatures(ih, iw, sub_bbox), getSimpleSpatialFeatures(ih, iw, obj_bbox)),axis=0)
+                tot_feat = np.concatenate((sem_feat,spat_feat), axis=0)
+                tot_appr_features.append(np.transpose(appr_feat_temp))
+                tot_features.append(tot_feat)
+                tot_pred.append(gt_spo[j][i,1])
+        print(np.array(tot_features).shape,np.array(tot_appr_features).shape,np.array(tot_pred).shape)
+        return np.array(tot_features),np.array(tot_appr_features),np.array(tot_pred)
+    else:
+        print('Loaded Annotations')
+        t =0
+        for img in annotations[10000:20000]:
+            print(t,img)
+            img_file,gt_spo,gt_bb = vgImageToLabels(img)
+            im = cv2.imread(os.path.join(filepath,img_file)).astype(np.float32, copy=False)
+            ih = im.shape[0]
+            iw = im.shape[1]
+            for i in range(gt_spo.shape[0]):
+                sub_bbox = gt_bb[i,0,:4].astype(int)
+                obj_bbox = gt_bb[i,1,:4].astype(int)
+                sub_wordvec = glove_model[labels_to_names[gt_spo[i,0]]]
+                obj_wordvec = glove_model[labels_to_names[gt_spo[i,2]]]
+                sem_feat = np.concatenate((sub_wordvec,obj_wordvec),axis=0)
+                union_bbox = getUnionBBox(sub_bbox, obj_bbox, ih, iw)
+                appr_feat_temp = getAppr(im, union_bbox)
+                #appr_feat = apprSubnet(appr_feat_temp)
+                spat_feat = np.concatenate((getSimpleSpatialFeatures(ih, iw, sub_bbox), getSimpleSpatialFeatures(ih, iw, obj_bbox)),axis=0)
+                tot_feat = np.concatenate((sem_feat,spat_feat), axis=0)
+                tot_appr_features.append(np.transpose(appr_feat_temp))
+                tot_features.append(tot_feat)
+                tot_pred.append(gt_spo[i,1])
+        print(np.array(tot_appr_features).shape,np.array(tot_appr_features).shape,np.array(tot_pred).shape)
+        return np.array(tot_features),np.array(tot_appr_features),np.array(tot_pred)
+
+
+def feature_extraction_vgtot1(train_flag,zero_shot_flag):
+    glove_model = loadGloveModel(GLOVE_FILE_PATH)
+    labels_to_names = vgObjectsToNames()
+    tot_features = []
+    tot_appr_features =[]
+    tot_pred = []
+    vgg= vgg_model()
+    filepath = 'datasets/vg/VG_100K/'
+    if train_flag:
+        annotations = load_trainvg_ann()
+    else:
+        annotations = load_testvg_ann()
+    if zero_shot_flag:
+        img_files,gt_spo,gt_bb = load_zeroshot()
+        for j in range(len(img_files)):
+            im = cv2.imread(os.path.join(filepath,img_files[j])).astype(np.float32, copy=False)
+            ih = im.shape[0]
+            iw = im.shape[1]
+            for i in range(gt_spo[j].shape[0]):
+                sub_bbox = gt_bb[j][i,0,:4].astype(int)
+                obj_bbox = gt_bb[j][i,1,:4].astype(int)
+                sub_wordvec = glove_model[labels_to_names[gt_spo[j][i,0]]]
+                obj_wordvec = glove_model[labels_to_names[gt_spo[j][i,2]]]
+                sem_feat = np.concatenate((sub_wordvec,obj_wordvec),axis=0)
+                union_bbox = getUnionBBox(sub_bbox, obj_bbox, ih, iw)
+                appr_feat_temp = getAppr(im, union_bbox)
+                #appr_feat = apprSubnet(appr_feat_temp)
+                spat_feat = np.concatenate((getSimpleSpatialFeatures(ih, iw, sub_bbox), getSimpleSpatialFeatures(ih, iw, obj_bbox)),axis=0)
+                tot_feat = np.concatenate((sem_feat,spat_feat), axis=0)
+                print(appr_feat_temp.shape)
+                tot_appr_features.append(vgg.predict(np.transpose(appr_feat_temp)))
+                tot_features.append(tot_feat)
+                tot_pred.append(gt_spo[j][i,1])
+        print(np.array(tot_features).shape,np.array(tot_appr_features).shape,np.array(tot_pred).shape)
+        return np.array(tot_features),np.array(tot_appr_features),np.array(tot_pred)
+    else:
+        print('Loaded Annotations')
+        t =0
+        for img in annotations[:10000]:
+            img_file,gt_spo,gt_bb = vgImageToLabels(img)
+            im = cv2.imread(os.path.join(filepath,img_file)).astype(np.float32, copy=False)
+            ih = im.shape[0]
+            iw = im.shape[1]
+            for i in range(gt_spo.shape[0]):
+                sub_bbox = gt_bb[i,0,:4].astype(int)
+                obj_bbox = gt_bb[i,1,:4].astype(int)
+                sub_wordvec = glove_model[labels_to_names[gt_spo[i,0]]]
+                obj_wordvec = glove_model[labels_to_names[gt_spo[i,2]]]
+                sem_feat = np.concatenate((sub_wordvec,obj_wordvec),axis=0)
+                union_bbox = getUnionBBox(sub_bbox, obj_bbox, ih, iw)
+                appr_feat_temp = getAppr(im, union_bbox)
+                #appr_feat = apprSubnet(appr_feat_temp)
+                spat_feat = np.concatenate((getSimpleSpatialFeatures(ih, iw, sub_bbox), getSimpleSpatialFeatures(ih, iw, obj_bbox)),axis=0)
+                tot_feat = np.concatenate((sem_feat,spat_feat), axis=0)
+                print(np.transpose(appr_feat_temp).shape)
+                x = vgg.predict(np.expand_dims(np.transpose(appr_feat_temp),axis=0))
+                tot_appr_features.append(x)
+                tot_features.append(tot_feat)
+                tot_pred.append(gt_spo[i,1])
+        print(np.array(tot_features).shape,np.array(tot_appr_features).shape,np.array(tot_pred).shape)
+        return np.array(tot_features),np.array(tot_appr_features),np.array(tot_pred)
+
+
+def vg_preprocess(img,glove_model,labels_to_names):
+    filepath = 'datasets/vg/VG_100K/'
+    tot_features = []
+    tot_appr_features =[]
+    tot_pred = []
+    img_file,gt_spo,gt_bb = vgImageToLabels(img)
+    im = cv2.imread(os.path.join(filepath,img_file)).astype(np.float32, copy=False)
+    ih = im.shape[0]
+    iw = im.shape[1]
+    for i in range(gt_spo.shape[0]):
+        sub_bbox = gt_bb[i,0,:4].astype(int)
+        obj_bbox = gt_bb[i,1,:4].astype(int)
+        sub_wordvec = glove_model[labels_to_names[gt_spo[i,0]]]
+        obj_wordvec = glove_model[labels_to_names[gt_spo[i,2]]]
+        sem_feat = np.concatenate((sub_wordvec,obj_wordvec),axis=0)
+        union_bbox = getUnionBBox(sub_bbox, obj_bbox, ih, iw)
+        appr_feat_temp = getAppr(im, union_bbox)
+        #appr_feat = apprSubnet(appr_feat_temp)
+        spat_feat = np.concatenate((getSimpleSpatialFeatures(ih, iw, sub_bbox), getSimpleSpatialFeatures(ih, iw, obj_bbox)),axis=0)
+        tot_feat = np.concatenate((sem_feat,spat_feat), axis=0)
+        tot_appr_features.append(np.transpose(appr_feat_temp))
+        tot_features.append(tot_feat)
+        tot_pred.append(gt_spo[i,1])
+    return np.array(tot_features),np.array(tot_appr_features),np.array(tot_pred)
+    # return tot_features,tot_appr_features,tot_pred
+
+def fetch_batch_vg(annotations,batch_size,glove_model,labels_to_names,num_classes):
+    batch_features = []
+    batch_labels = []
+    for i in range(batch_size):
+        x  =[]
+        index = random.choice(annotations)
+        sem_feat,appr_feat,pred = vg_preprocess(index,glove_model,labels_to_names)
+        x.append(appr_feat)
+        x.append(sem_feat)
+        batch_features.append(x)
+        batch_labels.append(to_categorical(pred, num_classes))
+    return np.array(batch_features),np.array(batch_labels)
+
+
+
+def vg_data_gen(train_flag,glove_model,labels_to_names,batch_size,num_classes):
+    if train_flag:
+        annotations = load_trainvg_ann()
+    else:
+        annotations = load_testvg_ann()
+
+    while True:
+        batch_features,batch_labels=fetch_batch_vg(annotations,batch_size,glove_model,labels_to_names,num_classes)
+        yield batch_features, batch_labels
+
+
+class vgDataGenerator(Sequence):
+    'Generates data for Keras'
+    def __init__(self, list_IDs, glove_model,labels_to_names, batch_size=32,
+                 n_classes=100, shuffle=True):
+        'Initialization'
+        self.batch_size = batch_size
+        self.list_IDs = list_IDs
+        self.glove_model = glove_model
+        self.labels_to_names = labels_to_names
+        self.n_classes = n_classes
+        self.shuffle = shuffle
+        self.on_epoch_end()
+
+    def __len__(self):
+        'Denotes the number of batches per epoch'
+        return int(np.floor(len(self.list_IDs) / self.batch_size))
+
+    def __getitem__(self, index):
+        'Generate one batch of data'
+        # Generate indexes of the batch
+        indexes = self.indexes[index*self.batch_size:(index+1)*self.batch_size]
+
+        # Find list of IDs
+        list_IDs_temp = [self.list_IDs[k] for k in indexes]
+        # Generate data
+        X, y = self.__data_generation(list_IDs_temp)
+
+        return X, y
+
+    def on_epoch_end(self):
+        'Updates indexes after each epoch'
+        self.indexes = np.arange(len(self.list_IDs))
+        if self.shuffle == True:
+            np.random.shuffle(self.indexes)
+
+    def __data_generation(self, list_IDs_temp):
+        'Generates data containing batch_size samples' # X : (n_samples, *dim, n_channels)
+        # Initialization
+        init_size= len(list_IDs_temp[0][b'rel_classes'])
+        X = np.empty((init_size,224,224,3))
+        X1= np.empty((init_size,610))
+        y= np.empty(init_size, dtype=int)
+        # Generate data
+        for i, ID in enumerate(list_IDs_temp):
+            # get sample
+            if(i == 0):
+                X1,X,y= vg_preprocess(ID,self.glove_model,self.labels_to_names)
+            else:
+                sem_feat,appr_feat,pred= vg_preprocess(ID,self.glove_model,self.labels_to_names)
+                X=np.concatenate((X,appr_feat),axis=0)
+                X1=np.concatenate((X1,sem_feat),axis=0)
+                y=np.concatenate((y,pred),axis=0)
+        if(X.shape[0] > 32):
+            X=X[:32]
+            X1=X1[:32]
+            y=y[:32]
+        return [X,X1],to_categorical(y, num_classes=self.n_classes)
+
+
+'''
+training the feature model
+'''
+def train_model_vg():
+    load_session()
+    model = feature_model(100)
+    model.compile(optimizer='adam',loss='categorical_crossentropy',metrics=['accuracy'])
+    modelsave_filepath="snapshots/feat_models/weights-vg-{epoch:02d}.hdf5"
+    checkpointer = ModelCheckpoint(modelsave_filepath, verbose=0, save_best_only=False, save_weights_only=False, mode='auto', period=1)
+    glove_model =  loadGloveModel(GLOVE_FILE_PATH)
+    labels_to_names = vgObjectsToNames()
+    annotations = load_trainvg_ann()
+    vg_generator = vgDataGenerator(annotations,glove_model, labels_to_names, batch_size=32, n_classes=100, shuffle=True)
+    generator = vg_data_gen(True, glove_model, labels_to_names, 1,100)
+    model.fit_generator(vg_generator, steps_per_epoch=73794, epochs=20, verbose=1, callbacks=[checkpointer], workers=5, use_multiprocessing=True)
+    return
+
+
+##################################################################################################################################################################################
+
+
+
+
+
 
 def main():
 	#resnet50_coco_best_v2.0.1.h5
@@ -452,8 +774,16 @@ def main():
 	#visualize_pred('objdet/test_images/image3.jpg',bb_score)
 	#feat= feature_extraction('1602315_961e6acf72_b.jpg')
     #resume_model()
-    save_features(False,False)
+    # save_featuresVG(True,False)
     # load_features_tot()
+    # x =fetch_batch_vg(32,glove_model,labels_to_names):
+    # train_model_vg()
+    # load_session()
+    # a = vgg_model()
+    # train_model(True)
+    x =10
+
+
 
 if __name__ == "__main__":
     main()

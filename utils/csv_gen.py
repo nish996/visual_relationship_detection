@@ -14,7 +14,7 @@ TEST_JSON_PATH='/media/data/nishanth/datasets/json_dataset/annotations_test.json
 APPEND_TRAIN_PATH='sg_dataset/sg_train_images/'
 APPEND_TEST_PATH='sg_dataset/sg_test_images/'
 
-# format: path,x1,x2,y1,y2,class_name
+# format: path,x1,y1,x2,y2,class_name
 
 objects=json.load(open(OBJECT_JSON_PATH))
 predicates=json.load(open(PREDICATE_JSON_PATH))
