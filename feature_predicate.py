@@ -38,7 +38,7 @@ from utils.csv_gen import train_annotations,test_annotations,labelsToNames, imag
 from utils.zeroSplit import zeroTestImageToLabels
 from utils.vg_load import load_testvg_ann,load_trainvg_ann,load_zeroshot,vgPredicatesToNames,vgObjectsToNames,vgImageToLabels
 from utils.appr_utils import getAppr,getUnionBBox,getDualMask,getSimpleSpatialFeatures
-from utils.sem_utils import loadGloveModel, saveVgObjGloveFeat,loadVgObjGloveFeat
+from utils.sem_utils import loadGloveModel, saveVgObjGloveFeat,loadVgObjGloveFeat,GLOVE_FILE_PATH,loadObjGloveFeat
 from utils.vgdata_gen import vgDataGenerator,vg_preprocess,fetch_batch_vg,vg_data_gen
 
 
@@ -47,7 +47,6 @@ import tensorflow as tf
 
 cpu_id = "2"
 
-GLOVE_FILE_PATH = '/media/data/nishanth/datasets/glove_data/glove.42B.300d.txt'
 
 def load_session():
     # use this environment flag to change which GPU to use
@@ -62,6 +61,21 @@ def get_session():
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     return tf.Session(config=config)
+
+
+
+
+
+def load_featmodel(model_name):
+
+
+    # adjust this to point to your downloaded/trained model
+    model_path = os.path.join('snapshots', model_name)
+
+    # load retinanet model
+    model = keras.models.load_model(model_path)
+
+    return model
 
 
 ###########################################################################################
@@ -134,7 +148,7 @@ def feature_extraction(img_file):
 	im = cv2.imread(os.path.join('datasets/sg_dataset/sg_train_images',img_file)).astype(np.float32, copy=False)
 	ih = im.shape[0]
 	iw = im.shape[1]
-	glove_model = loadGloveModel(GLOVE_FILE_PATH)
+	glove_model = loadObjGloveFeat()
 	labels_to_names = labelsToNames()
 	gt_spo,gt_bb = imageToLabels(train_annotations, img_file)
 	tot_features = []
@@ -162,7 +176,7 @@ if flag is set to true: extracts features from train data
 else extracts features from test data
 '''
 def feature_extraction_tot(train_flag,zero_shot_flag):
-    glove_model = loadGloveModel(GLOVE_FILE_PATH)
+    glove_model = loadObjGloveFeat()
     labels_to_names = labelsToNames()
     tot_features = []
     tot_appr_features =[]
@@ -242,7 +256,7 @@ testing the feature model
 '''
 def test_model(zero_shot_flag):
     print('Loading Model')
-    feature_model = load_model('feat_models/weights-30.hdf5')
+    feature_model = load_featmodel('feat_models/weights-30.hdf5')
     feature_model.summary()
     print('Loaded Model')
     print("Loading Feature Extraction Module")
@@ -313,7 +327,12 @@ def save_featuresVG(train_flag,zero_shot_flag,glove_model,fc_flag):
             np.save(open('snapshots/pred_zero','wb'),pred)
 
 
-def feature_extraction_vgtot(train_flag,zero_shot_flag):
+def train_vg(train_flag,zero_shot_flag,batch_size,epoch):
+    if(not(zero_shot_flag)): 
+        load_session()
+        model = feature_model(100)
+        model.compile(optimizer='adam',loss='categorical_crossentropy',metrics=['accuracy'])
+        modelsave_filepath="snapshots/feat_models/weights-newvg-{0:02d}.hdf5"
     glove_model = loadVgObjGloveFeat()
     labels_to_names = vgObjectsToNames()
     tot_features = []
@@ -348,9 +367,15 @@ def feature_extraction_vgtot(train_flag,zero_shot_flag):
         return np.array(tot_features),np.array(tot_appr_features),np.array(tot_pred)
     else:
         print('Loaded Annotations')
+    for j in range(epoch):
+        print("Epoch ",j)
+        random.shuffle(annotations, random=random.random)
+        sample_count  = 0
+        batch_count = 0
         t =0
-        for img in annotations[10000:20000]:
-            print(t,img)
+        cum_x = np.zeros(2)
+        for img in annotations:
+            sample_count = sample_count+1
             img_file,gt_spo,gt_bb = vgImageToLabels(img)
             im = cv2.imread(os.path.join(filepath,img_file)).astype(np.float32, copy=False)
             ih = im.shape[0]
@@ -369,8 +394,23 @@ def feature_extraction_vgtot(train_flag,zero_shot_flag):
                 tot_appr_features.append(np.transpose(appr_feat_temp))
                 tot_features.append(tot_feat)
                 tot_pred.append(gt_spo[i,1])
-        print(np.array(tot_appr_features).shape,np.array(tot_appr_features).shape,np.array(tot_pred).shape)
-        return np.array(tot_features),np.array(tot_appr_features),np.array(tot_pred)
+                t  = t+1
+                if(t % batch_size == 0 ):
+                    batch_count = batch_count +1
+                    X = np.array(tot_appr_features)
+                    X1 = np.array(tot_features)
+                    Y = to_categorical(np.array(tot_pred),100)
+                    x = model.train_on_batch([X,X1],Y)
+                    cum_x = cum_x+x
+                    tot_features = []
+                    tot_appr_features =[]
+                    tot_pred = []
+                    print(x)
+                    avg = cum_x/batch_count
+                    print(avg)
+            print(sample_count)
+        model.save(modelsave_filepath.format(j))
+    return model
 
 
 def feature_extraction_vgtot1(train_flag,zero_shot_flag,fc_flag):
@@ -411,9 +451,7 @@ def feature_extraction_vgtot1(train_flag,zero_shot_flag,fc_flag):
     else:
         print('Loaded Annotations')
         t =0
-        for img in annotations[10000:10001]:
-            print(t)
-            t = t+1
+        for img in annotations:
             img_file,gt_spo,gt_bb = vgImageToLabels(img)
             im = cv2.imread(os.path.join(filepath,img_file)).astype(np.float32, copy=False)
             ih = im.shape[0]
@@ -439,7 +477,7 @@ def feature_extraction_vgtot1(train_flag,zero_shot_flag,fc_flag):
 
 
 '''
-training the feature model
+training the feature model for visual genome
 '''
 def train_model_vg():
     load_session()
@@ -454,6 +492,45 @@ def train_model_vg():
     generator = vg_data_gen(True, glove_model, labels_to_names, 1,100)
     model.fit_generator(vg_generator, steps_per_epoch=73794, epochs=20, verbose=1, callbacks=[checkpointer], workers=5, use_multiprocessing=True)
     return
+
+
+
+'''
+testing the feature model for visual genome
+'''
+def test_model_vg():
+    load_session()
+    print('Loading Model')
+    feature_model = load_featmodel('feat_models/weights-vg40-1.hdf5')
+    feature_model.summary()
+    print('Loaded Model')
+    glove_model =  loadVgObjGloveFeat()
+    labels_to_names = vgObjectsToNames()
+    annotations = load_testvg_ann()
+    vg_generator = vgDataGenerator(annotations,glove_model, labels_to_names, batch_size=1, n_classes=100, shuffle=True)
+    generator = vg_data_gen(True, glove_model, labels_to_names, 1,100)
+    scores =feature_model.evaluate_generator(vg_generator, steps=25858, max_queue_size=10, workers=1, use_multiprocessing=True)
+    print(scores)
+    return
+
+
+
+
+'''
+testing thr feature model zeroshot
+'''
+def test_model_vgzeroshot():
+    load_session()
+    print('Loading Model')
+    feature_model = load_featmodel('feat_models/weights-vg-06.hdf5')
+    feature_model.summary()
+    print('Loaded Model')
+    print("Loading Feature Extraction Module")
+    sem_feat,appr_feat,pred = train_vg(False,True, 40,1)
+    print("Loaded Features :)")
+    pred_encoded = to_categorical(pred, num_classes=100)
+    scores = feature_model.evaluate([appr_feat,sem_feat],pred_encoded)
+    print(scores)
 
 
 ##################################################################################################################################################################################
@@ -473,7 +550,7 @@ def main():
     # save_featuresVG(True,False)
     # load_features_tot()
     # x =fetch_batch_vg(32,glove_model,labels_to_names):
-    train_model_vg()
+    # train_model_vg()
     # a = vgg_model()
     # train_model(True)
     # feature_extraction_vgtot1(True,False,True)

@@ -1,8 +1,12 @@
 import pickle as pk
 import numpy as np
+import os
 
 from utils.vg_load import vgObjectsToNames
 from utils.csv_gen import labelsToNames
+
+
+GLOVE_FILE_PATH = '/media/data/nishanth/datasets/glove_data/glove.42B.300d.txt'
 '''
 sematic features for a word using Glove
 '''

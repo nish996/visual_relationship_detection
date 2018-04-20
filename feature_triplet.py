@@ -171,7 +171,7 @@ def get_session():
     config.gpu_options.allow_growth = True
     return tf.Session(config=config)
 
-def load_model(model_name):
+def load_retinanet_model(model_name):
 
     # use this environment flag to change which GPU to use
     os.environ["CUDA_VISIBLE_DEVICES"] = "1"
