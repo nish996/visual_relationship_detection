@@ -1,5 +1,5 @@
 # vrd
-DDP
+Visual relationship detection - Detects relationships between various objects in an image
 
 Preprocessing Data
 
